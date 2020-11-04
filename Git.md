@@ -8,9 +8,9 @@ git clone https://github.com/wanwanpp/spring-framework-4.2.0.git
 
 > 设置用户名和邮件
 
-git config --global user.name "zmxqq"
+git config --global user.name "lijiaqing"
 
-git config --global user.email "111@qq.com"
+git config --global user.email "1013960792@qq.com"
 
 > 查看用户名和邮件
 

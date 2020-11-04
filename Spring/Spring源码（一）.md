@@ -162,19 +162,13 @@ public BeanDefinition getBeanDefinition(String beanName) throws NoSuchBeanDefini
 
 #### 5.实例化：实例化Bean
 
-doGetBean
+**一级缓存：**private final Map<String, Object> **singletonObjects** = new ConcurrentHashMap<>(256);
 
-1.验证beanName是否合法
+**二级缓存：**private final Map<String, Object> **earlySingletonObjects** = new HashMap<>(16);
 
-```
-final String beanName = transformedBeanName(name);
-```
+**三级缓存：**private final Map<String, ObjectFactory<?>> **singletonFactories** = new HashMap<>(16);
 
-2.getSingleton(beanName);Spring从单例池`SingletonObjects`中尝试取出这个bean，判断是否已经实例化
 
-```
-Object sharedInstance = getSingleton(beanName);
-```
 
 > **getBean**
 >
@@ -189,40 +183,55 @@ Object sharedInstance = getSingleton(beanName);
 > ```Java
 > protected <T> T doGetBean(final String name, 。。。) throws BeansException {
 > 	// 验证beanName合法性
->     final String beanName = transformedBeanName(name);
->     // 检查单例池中此bean是否已经手动生成
->     Object sharedInstance = getSingleton(beanName);
->     // 若单例池中没有此bean，
->     if (sharedInstance != null && args == null) {...}
->     else {
->         // 判断这个类是不是在创建过程中,是则抛出异常
->         if (isPrototypeCurrentlyInCreation(beanName)) {
->             throw new BeanCurrentlyInCreationException(beanName);
->         }
->     }
->     
->     //继续进行一系列验证...
->     
->     // 如果是单例
->     if (mbd.isSingleton()) {
->         //...
->         // bean开始创建
->     	return createBean(beanName, mbd, args);
->     }
->     //...
+>  final String beanName = transformedBeanName(name);
+>  // 检查单例池中此bean是否已经手动生成
+>  Object sharedInstance = getSingleton(beanName);
+>  // 若单例池中没有此bean，
+>  if (sharedInstance != null && args == null) {...}
+>  else {
+>      // 判断这个类是不是在创建过程中,是则抛出异常
+>      if (isPrototypeCurrentlyInCreation(beanName)) {
+>          throw new BeanCurrentlyInCreationException(beanName);
+>      }
+>  }
+>  
+>  //继续进行一系列验证...
+>  
+>  // 如果是单例
+>  if (mbd.isSingleton()) {
+>      //...
+>      // bean开始创建
+>  	return createBean(beanName, mbd, args);
+>  }
+>  //...
 > }
 > ```
 >
-> **getSingleton**
+> **getSingleton**	//判断单例池中是否已经有了这个bean
 >
 > ```Java
 > /** 单例对象缓存/单例池（beanName->bean实例）: bean name --> bean instance */
 > private final Map<String, Object> singletonObjects = new ConcurrentHashMap<>(256);
 > 
 > protected Object getSingleton(String beanName, boolean allowEarlyReference) {
->     Object singletonObject = this.singletonObjects.get(beanName);
->     //。。。
->     return singletonObject;
+>  	Object singletonObject = this.singletonObjects.get(beanName);
+>  	// 如果单例池中没有这个bean，且当前bean正在创建，则去三级缓存中取bean。
+>     // 循环依赖中，第一次初始化bean时‘正在创建’条件不成立，当循环到第二次初始化bean时，‘正在创建’条件成立
+>     if (singletonObject == null && isSingletonCurrentlyInCreation(beanName)) {
+>         // 条件一旦成立，就会从三级缓存中取出bean，移到二级缓存中
+>         synchronized (this.singletonObjects) {
+>             singletonObject = this.earlySingletonObjects.get(beanName);
+>             if (singletonObject == null && allowEarlyReference) {
+>                 ObjectFactory<?> singletonFactory = this.singletonFactories.get(beanName);
+>                 if (singletonFactory != null) {
+>                     singletonObject = singletonFactory.getObject();
+>                     this.earlySingletonObjects.put(beanName, singletonObject);
+>                     this.singletonFactories.remove(beanName);
+>                 }
+>             }
+>         }
+>     }
+>  	return singletonObject;
 > }
 > ```
 >
@@ -230,14 +239,14 @@ Object sharedInstance = getSingleton(beanName);
 >
 > ```Java
 > protected Object createBean(String beanName, RootBeanDefinition mbd, ...)throws BeanCreationException {
->     //...
->     RootBeanDefinition mbdToUse = mbd;
->     //...
->     // 第一次调用后置处理器，允许用代理对象替换目标对象
->     Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
->     // ...
->     // 进入doCreateBean方法创建bean实例
->     Object beanInstance = doCreateBean(beanName, mbdToUse, args);
+>  //...
+>  RootBeanDefinition mbdToUse = mbd;
+>  //...
+>  // 第一次调用后置处理器，允许用代理对象替换目标对象
+>  Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+>  // ...
+>  // 进入doCreateBean方法创建bean实例
+>  Object beanInstance = doCreateBean(beanName, mbdToUse, args);
 > }
 > ```
 >
@@ -245,36 +254,37 @@ Object sharedInstance = getSingleton(beanName);
 >
 > ```Java
 > protected Object doCreateBean(final String beanName, final RootBeanDefinition mbd, final @Nullable Object[] args)throws BeanCreationException {
->     // 实例化bean
->     BeanWrapper instanceWrapper = null;
->     // 单例的，则从bean工厂里移除
->     if (mbd.isSingleton()) {
->         instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
->     }
->     if (instanceWrapper == null) {
->         // 实例化对象，createBeanInstance里第二次调用后置处理器（通过构造方法反射实例化对象）
->         instanceWrapper = createBeanInstance(beanName, mbd, args);
->         //。。。
->         // 第三次后置处理器，修改合并的bean定义
->         applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
->         //。。。
->         // 是否允许循环依赖（单例的&&允许循环依赖&&正在创建）【allowCircularReferences默认为true】
->         // 可以通过setAllowCircularReferences(false);设置不支持循环依赖
->         boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&isSingletonCurrentlyInCreation(beanName));
->         if (earlySingletonExposure) {
+>  // 实例化bean
+>  BeanWrapper instanceWrapper = null;
+>  // 单例的，则从bean工厂里移除
+>  if (mbd.isSingleton()) {
+>      instanceWrapper = this.factoryBeanInstanceCache.remove(beanName);
+>  }
+>  if (instanceWrapper == null) {
+>      // 实例化对象，createBeanInstance里第二次调用后置处理器（通过构造方法反射实例化对象）
+>      instanceWrapper = createBeanInstance(beanName, mbd, args);
+>      //。。。
+>      // 第三次后置处理器，修改合并的bean定义
+>      applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName);
+>      //。。。
+>      // 是否允许循环依赖（单例的&&允许循环依赖&&正在创建）【allowCircularReferences默认为true】
+>      // 可以通过setAllowCircularReferences(false);设置不支持循环依赖
+>      boolean earlySingletonExposure = (mbd.isSingleton() && this.allowCircularReferences &&isSingletonCurrentlyInCreation(beanName));
+>      if (earlySingletonExposure) {
 > 			//。。。
->             // 第四次调用后置处理器，判断是否需要AOP
+>          // 第四次调用后置处理器，判断是否需要AOP。将未完成的bean存入三级缓存。
 > 			addSingletonFactory(beanName, () -> getEarlyBeanReference(beanName, mbd, bean));
 > 		}
->         // 初始化bean实例
->         Object exposedObject = bean;
+>      // 初始化bean实例
+>      Object exposedObject = bean;
 > 		try {
->             // 填充属性，即自动注入。内部完成第五，第六次后置处理器调用
+>          // 填充属性，即自动注入。内部完成第五，第六次后置处理器调用
+>           	//注入属性时就会发现循环依赖的bean没有。
 > 			populateBean(beanName, mbd, instanceWrapper);
->             // 初始化Spring。内部完成第七，第八次后置处理器调用
+>          // 初始化Spring。内部完成第七，第八次后置处理器调用
 > 			exposedObject = initializeBean(beanName, exposedObject, mbd);
 > 		}
->     }
+>  }
 > }
 > ```
 >
@@ -350,11 +360,21 @@ Object sharedInstance = getSingleton(beanName);
 
 --------------------
 
-- **Spring是如何默认支持循环依赖的？**
+- > **Spring是如何默认支持循环依赖的？**
 
-Spring在生命周期中的(getBean--doGetBean--createBean--doCreateBean方法中)实例化bean中会判断当前Spring容器是否允许循环依赖，是由属性**allowCircularReferences**（默认为true：开启循环依赖）、是否单例、是否正在创建判断的。如果允许，则会第四次调用后置处理器
+  Spring在生命周期中的(getBean--doGetBean--createBean--doCreateBean方法中)实例化bean中会判断当前Spring容器是否允许循环依赖，由属性**allowCircularReferences**（默认为true：开启循环依赖）、是否单例、是否正在创建判断。如果允许，则会第四次调用后置处理器
 
-可以手动调用refresh()方法，并在此之前使用setAllowCircularReferences(false)关闭循环依赖。
+  可以手动调用refresh()方法，并在此之前使用setAllowCircularReferences(false)关闭循环依赖。
 
-也可以通过扩展功能关闭循环依赖。（如何扩展看标题3）
+  也可以通过扩展功能关闭循环依赖。（如何扩展看标题3）
+
+- > **@Autowired与@Resource有什么区别？**
+
+  `@Autowired`默认使用byType，匹配不到bean时再使用byName，此时的name是属性的名（xml中的byName是根据set方法名）。可以使用`@Qualifier()`指定bean的id。默认情况下必须要求依赖对象必须存在，如果要允许null值，可以设置它的required属性为false，如：@Autowired(required=false) 。
+
+  `@Resource`默认使用byName，当找不到与名称匹配的bean时才按照类型进行装配。但是需要注意的是，如果name属性一旦指定，就只会按照名称进行装配。可以`@Resource(name = / type =)`指定name与type。
+
+  `@Autowired`是由后置处理器AutowiredAnnotationBeanPostProcessor类解析的
+
+  `@Resource`是由后置处理器CommonAnnotationBeanPostProcessor类解析的
 

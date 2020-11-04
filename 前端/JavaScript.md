@@ -58,3 +58,14 @@ HTTP标准包含这两种方法是为了达到不同的目的。POST用于创建
   * 请求结果无持续性的副作用。
   * 收集的数据及HTML表单内的输入字段名称的总长不超过1024个字符。
 
+
+
+
+
+## 5. JSON.stringify()	JSON.parse()
+
+JSON.stringify()将JavaScript对象转为JSON对象
+
+而JSON.parse()可以将JSON字符串转为一个JavaScript对象
+
+转换时要注意格式，JSON格式要求键与值都必须用双引号
